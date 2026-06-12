@@ -29,3 +29,9 @@ dml-scholarship/outputs/models/*
 # IDE
 .vscode/
 .idea/
+
+# Third-party library source (installed via pip instead)
+doubleml-for-py-main/
+
+# Claude internal
+.claude/
