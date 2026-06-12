@@ -53,3 +53,5 @@ def audit(df: pd.DataFrame) -> None:
 if __name__ == "__main__":
     df = download()
     audit(df)
+
+#python dml-scholarship/src/01_load_data.py

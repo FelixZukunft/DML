@@ -1,0 +1,31 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data — raw stays local, processed can be regenerated
+dml-scholarship/data/raw/*
+dml-scholarship/data/processed/*
+!dml-scholarship/data/raw/.gitkeep
+!dml-scholarship/data/processed/.gitkeep
+
+# Saved models (large binaries)
+dml-scholarship/outputs/models/*
+!dml-scholarship/outputs/models/.gitkeep
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

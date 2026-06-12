@@ -1,3 +1,4 @@
+ucimlrepo>=0.0.3
 doubleml>=0.7
 scikit-learn>=1.4
 xgboost>=2.0
