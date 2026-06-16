@@ -1,6 +1,8 @@
 """Phase 6 — Fit all tuned DML models and save results.
 
-  python src/06_estimation.py     # fits all 4 models, writes results
+  python src/06_estimation.py            # fit on default dataset (raw)
+  python src/06_estimation.py semantic   # fit on the semantic dataset
+  # writes outputs/tables/ate_results_<dataset>.csv
 
 Downstream scripts import load_results():
   from estimation import load_results
@@ -19,12 +21,17 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from hyperparameter import get_tuned_models   # noqa: E402
-from config import D_COL                      # noqa: E402
+from hyperparameter import get_tuned_models                       # noqa: E402
+from config import D_COL, resolve_dataset, dataset_from_argv      # noqa: E402
 
 ROOT       = Path(__file__).parents[1]
 MODELS_DIR = ROOT / "outputs" / "models"
 TABLES_DIR = ROOT / "outputs" / "tables"
+
+
+def results_path(dataset_key: str) -> Path:
+    """Path of the ATE results CSV for a given dataset key."""
+    return TABLES_DIR / f"ate_results_{dataset_key}.csv"
 
 _DISPLAY = {
     "plr_lasso":         "PLR Lasso",
@@ -66,9 +73,14 @@ def _nuisance_rmse(model) -> dict[str, float]:
         return {}
 
 
-def load_results() -> pd.DataFrame:
-    """Return the ATE results table written by the __main__ block."""
-    return pd.read_csv(TABLES_DIR / "ate_results.csv")
+def load_results(dataset: str | None = None) -> pd.DataFrame:
+    """Return the ATE results table written by the __main__ block.
+
+    Args:
+      dataset — 'raw' or 'semantic' (default: $DML_DATASET or 'raw').
+    """
+    dataset_key, _ = resolve_dataset(dataset)
+    return pd.read_csv(results_path(dataset_key))
 
 
 if __name__ == "__main__":
@@ -80,13 +92,16 @@ if __name__ == "__main__":
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
 
+    dataset_key, data_path = resolve_dataset(dataset_from_argv(sys.argv[1:]))
+    print(f"Dataset: {dataset_key}  ({data_path.name})", flush=True)
+
     # OLS baseline
     registry = json.loads((MODELS_DIR / "model_registry.json").read_text())
     ols_coef_d = registry["ols_baseline"]["coef_d"]
 
     # Load all tuned models
     print("\nLoading tuned models...", flush=True)
-    bundle = get_tuned_models()
+    bundle = get_tuned_models(dataset_key)
     models = bundle["models"]
     print(f"Loaded: {list(models.keys())}", flush=True)
 
@@ -133,7 +148,7 @@ if __name__ == "__main__":
                 elapsed_min=round(elapsed / 60, 2),
             ))
 
-            pkl_path = MODELS_DIR / _PKL[name]
+            pkl_path = MODELS_DIR / _PKL[name].replace("_fitted.pkl", f"_fitted_{dataset_key}.pkl")
             with open(pkl_path, "wb") as fh:
                 pickle.dump(model, fh)
             print(f"Saved → {pkl_path}", flush=True)
@@ -161,7 +176,7 @@ if __name__ == "__main__":
         pd.DataFrame(rows),
     ], ignore_index=True)
 
-    csv_path = TABLES_DIR / "ate_results.csv"
+    csv_path = results_path(dataset_key)
     results_df.to_csv(csv_path, index=False)
 
     # ── Final comparison table ────────────────────────────────────────────

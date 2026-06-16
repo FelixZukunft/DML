@@ -3,7 +3,9 @@
 Tunes PLR (RF), PLR (XGBoost), and IRM (RF) using tune_ml_models().
 Lasso PLR is self-tuning via LassoCV/LogisticRegressionCV — no Optuna needed.
 
-  python src/05_hyperparameter.py     # runs all tuning, writes best_hyperparams.json
+  python src/05_hyperparameter.py            # tune on default dataset (raw)
+  python src/05_hyperparameter.py semantic   # tune on semantic dataset
+  # writes outputs/models/best_hyperparams_<dataset>.json
 
 Downstream phases import the tuned model factory:
   from hyperparameter import get_tuned_models
@@ -23,14 +25,24 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from xgboost import XGBClassifier, XGBRegressor
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import D_COL, Y_COL, get_x_cols_encoded   # noqa: E402
+from config import (                                   # noqa: E402
+    D_COL, Y_COL, get_x_cols_encoded, resolve_dataset, dataset_from_argv,
+)
 from ml_methods import get_learners                    # noqa: E402
 
-ROOT      = Path(__file__).parents[1]
-DATA_PATH = ROOT / "data" / "processed" / "dml_ready.csv"
-OUT_DIR   = ROOT / "outputs" / "models"
+ROOT    = Path(__file__).parents[1]
+OUT_DIR = ROOT / "outputs" / "models"
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+
+def hyperparams_path(dataset_key: str) -> Path:
+    """Path of the best-hyperparameter file for a given dataset key.
+
+    Keyed by dataset so 'raw' and 'semantic' tuning runs don't overwrite
+    each other's results.
+    """
+    return OUT_DIR / f"best_hyperparams_{dataset_key}.json"
 
 
 # ── Param extractors ───────────────────────────────────────────────────────
@@ -107,23 +119,31 @@ def ml_m_irm_params(trial: optuna.Trial) -> dict:
 
 # ── Tuned model factory (imported by 06_estimation.py) ────────────────────
 
-def get_tuned_models() -> dict:
+def get_tuned_models(dataset: str | None = None) -> dict:
     """Instantiate all 4 DML models with tuned hyperparameters (unfitted).
 
-    Loads best_hyperparams.json written by this script's __main__ block.
-    Lasso PLR is included with its original self-tuning spec (no Optuna params).
+    Args:
+      dataset — 'raw' or 'semantic' (default: $DML_DATASET or 'raw'). Selects
+                both the data backend and the matching best-hyperparams file.
+
+    Loads best_hyperparams_<dataset>.json written by this script's __main__
+    block. Lasso PLR is included with its original self-tuning spec (no Optuna
+    params).
 
     Returns:
-      {'models': {name: unfitted_tuned_model}, 'dml_data': DoubleMLData}
+      {'models': {name: unfitted_tuned_model}, 'dml_data': DoubleMLData,
+       'dataset': key}
     """
-    params_path = OUT_DIR / "best_hyperparams.json"
+    dataset_key, data_path = resolve_dataset(dataset)
+    params_path = hyperparams_path(dataset_key)
     if not params_path.exists():
         raise FileNotFoundError(
-            f"{params_path} not found — run `python src/05_hyperparameter.py` first."
+            f"{params_path} not found — run "
+            f"`python src/05_hyperparameter.py {dataset_key}` first."
         )
     best = json.loads(params_path.read_text())
 
-    df = pd.read_csv(DATA_PATH)
+    df = pd.read_csv(data_path)
     x_cols = get_x_cols_encoded(df)
     data_obj = dml.DoubleMLData(
         df, y_col=Y_COL, d_cols=D_COL, x_cols=x_cols,
@@ -178,6 +198,7 @@ def get_tuned_models() -> dict:
             "irm_random_forest": irm_rf,
         },
         "dml_data": data_obj,
+        "dataset": dataset_key,
     }
 
 
@@ -188,7 +209,9 @@ if __name__ == "__main__":
     OPTUNA_SETTINGS = {"n_trials": 30, "verbosity": optuna.logging.WARNING}
 
     # ─── STEP 1: Load data ────────────────────────────────────────────────
-    df = pd.read_csv(DATA_PATH)
+    dataset_key, data_path = resolve_dataset(dataset_from_argv(sys.argv[1:]))
+    print(f"Dataset: {dataset_key}  ({data_path.name})")
+    df = pd.read_csv(data_path)
     x_cols = get_x_cols_encoded(df)
     obj_dml_data = dml.DoubleMLData(
         df, y_col=Y_COL, d_cols=D_COL, x_cols=x_cols,
@@ -267,7 +290,7 @@ if __name__ == "__main__":
         },
     }
 
-    params_path = OUT_DIR / "best_hyperparams.json"
+    params_path = hyperparams_path(dataset_key)
     params_path.write_text(json.dumps(best_params, indent=2))
     print(f"\nBest params saved → {params_path}")
     print(json.dumps(best_params, indent=2))

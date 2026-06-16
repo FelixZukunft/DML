@@ -3,7 +3,8 @@
 Defines the data backend, the PLR models (primary) and IRM model (robustness),
 a naive OLS/Ridge baseline, and a JSON model registry. No model is fitted here.
 
-  python src/04_dml_specs.py     # configure + print summaries + write registry
+  python src/04_dml_specs.py            # configure on default dataset (raw)
+  python src/04_dml_specs.py semantic   # configure on the semantic dataset
 
 Downstream phases import the model factory:
   from dml_specs import get_all_models
@@ -20,21 +21,27 @@ from sklearn.base import clone
 import statsmodels.api as sm
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import Y_COL, D_COL, get_x_cols_encoded   # noqa: E402
+from config import (                                   # noqa: E402
+    Y_COL, D_COL, get_x_cols_encoded, resolve_dataset,
+)
 from ml_methods import get_learners                    # noqa: E402
 
 ROOT = Path(__file__).parents[1]
-DATA_PATH = ROOT / "data" / "processed" / "dml_ready.csv"
 
 
 # ── Model factory (imported by 05_estimation.py) ───────────────────────────
-def get_all_models() -> dict:
+def get_all_models(dataset: str | None = None) -> dict:
     """Instantiate all DML models fresh (unfitted).
+
+    Args:
+      dataset — 'raw' or 'semantic' (default: $DML_DATASET or 'raw'). Selects
+                which processed CSV the DoubleMLData backend is built from.
 
     Returns dict with keys:
       'models'   — {'plr_lasso', 'plr_random_forest', 'plr_xgboost',
                     'irm_random_forest'} → unfitted DoubleML model objects
       'dml_data' — the DoubleMLData backend
+      'dataset'  — the resolved dataset key ('raw' | 'semantic')
 
     Usage in 05_estimation.py:
       from dml_specs import get_all_models
@@ -45,7 +52,8 @@ def get_all_models() -> dict:
           model.fit()
           print(model.summary)
     """
-    df = pd.read_csv(DATA_PATH)
+    dataset_key, data_path = resolve_dataset(dataset)
+    df = pd.read_csv(data_path)
     x_cols = get_x_cols_encoded(df)
     data_obj = dml.DoubleMLData(
         df, y_col=Y_COL, d_cols=D_COL, x_cols=x_cols,
@@ -76,21 +84,25 @@ def get_all_models() -> dict:
             n_folds=5, n_rep=10, score="ATE"),
     }
 
-    return {"models": all_models, "dml_data": data_obj}
+    return {"models": all_models, "dml_data": data_obj, "dataset": dataset_key}
 
 
 if __name__ == "__main__":
     import numpy as np
     from sklearn.linear_model import RidgeCV
     from sklearn.feature_selection import SelectKBest, f_regression
+    from config import dataset_from_argv
 
     # ─── STEP 1: Load data and build DoubleMLData object ─────────────────────
-    df = pd.read_csv(DATA_PATH)
+    dataset_key, data_path = resolve_dataset(dataset_from_argv(sys.argv[1:]))
+    print(f"Dataset: {dataset_key}  ({data_path.name})")
+    df = pd.read_csv(data_path)
     x_cols = get_x_cols_encoded(df)
 
     # Safety check: confirm no post-treatment variables leaked in
     assert not any("1st sem" in c for c in x_cols), "POST-TREATMENT LEAK DETECTED"
-    assert len(x_cols) > 200, f"Expected >200 X cols after encoding, got {len(x_cols)}"
+    min_x = 200 if dataset_key == "raw" else 40
+    assert len(x_cols) > min_x, f"Expected >{min_x} X cols for {dataset_key}, got {len(x_cols)}"
 
     obj_dml_data = dml.DoubleMLData(
         df,
@@ -180,6 +192,7 @@ if __name__ == "__main__":
 
     # ─── STEP 5: Save model registry ─────────────────────────────────────────
     registry = {
+        "dataset": dataset_key,
         "plr_lasso": {
             "type": "PLR",
             "learner": "lasso",
@@ -243,6 +256,7 @@ if __name__ == "__main__":
     # ─── FINAL OUTPUT ─────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
     print("04_dml_specs.py — COMPLETE")
+    print(f"  Dataset: {dataset_key}  ({data_path.name})")
     print(f"  Data: {df.shape[0]} obs × {len(x_cols)} X columns")
     print(f"  Models defined: PLR×3 + IRM×1")
     print(f"  OLS baseline: fitted (coef_D = {ols_coef_d:.4f})")
